@@ -1,0 +1,5 @@
+build/
+ossim
+*.o
+*.csv
+.DS_Store
