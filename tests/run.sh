@@ -75,6 +75,13 @@ check "SRTF on arrivals.txt: avg waiting 9.83"   "$SRTF" "avg_waiting=9.83"
 check "SRTF on arrivals.txt: avg response 9.00"  "$SRTF" "avg_response=9.00"
 check "SRTF on arrivals.txt: 9 context switches" "$SRTF" "context_switches=9"
 
+# MLFQ (quanta 2, 4, 8, boost at t=20): every arrival preempts at level 0, so
+#       all response times are 0. waiting 25,23,20,0,9,15 = 92/6
+MLFQ="$BIN workloads/arrivals.txt --sched mlfq --quantum 2 --no-paging"
+check "MLFQ on arrivals.txt: avg waiting 15.33"   "$MLFQ" "avg_waiting=15.33"
+check "MLFQ on arrivals.txt: avg response 0.00"   "$MLFQ" "avg_response=0.00"
+check "MLFQ on arrivals.txt: 19 context switches" "$MLFQ" "context_switches=19"
+
 # --- checkpoint 2 ----------------------------------------------------------
 check "Paging: LRU, 3 frames -> 12 faults (textbook Sec. 10.4.4)" \
       "$BIN workloads/paging_p1.txt --frames 3 --replace lru" "page_faults=12"
