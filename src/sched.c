@@ -111,13 +111,72 @@ static scheduler_t sched_srtf = {
 static void prio_init(void) { die("scheduler 'prio' is not implemented yet (src/sched.c)"); }
 static scheduler_t sched_prio = { "prio", prio_init, NULL, NULL, NULL, NULL, NULL, NULL };
 
-/* MLFQ
- * TODO: multilevel feedback queue with 3 levels, RR with quantum q, 2q and
- * 4q. A process that uses its whole quantum goes down one level. A process
- * that blocks before the quantum ends stays where it is. Every 20 ticks,
- * move everyone back to level 0 so nobody starves. Use p->level. */
-static void mlfq_init(void) { die("scheduler 'mlfq' is not implemented yet (src/sched.c)"); }
-static scheduler_t sched_mlfq = { "mlfq", mlfq_init, NULL, NULL, NULL, NULL, NULL, NULL };
+/* MLFQ: multilevel feedback queue, 3 levels, RR in each level with quantum
+ * q, 2q, 4q (q = cfg.quantum). Level 0 is the highest priority.
+ * Data structure: one FIFO queue per level, and p->level in the PCB.
+ * Rules:
+ *   - A new process starts at level 0. pick() takes the head of the highest
+ *     non-empty level.
+ *   - A process that uses its whole quantum moves down one level (level 2
+ *     stays at level 2). It is preempted if someone at its new level or
+ *     higher is ready; otherwise it keeps the CPU with the new quantum.
+ *   - A process that blocks (io, disk, semaphore...) before its quantum ends
+ *     keeps its level. So does one preempted by a higher level.
+ *   - A READY process at a higher level preempts the running one.
+ * The quantum restarts at every dispatch (as in RR).
+ * Not done yet: the priority boost every 20 ticks. */
+#define MLFQ_LEVELS 3
+
+static queue_t mlfq_q[MLFQ_LEVELS];
+
+static int mlfq_quantum(int level) { return cfg.quantum << level; }   /* q, 2q, 4q */
+
+/* The highest level (smallest number) with a READY process, MLFQ_LEVELS if none. */
+static int mlfq_best_level(void)
+{
+    for (int l = 0; l < MLFQ_LEVELS; l++)
+        if (!q_empty(&mlfq_q[l])) return l;
+    return MLFQ_LEVELS;
+}
+
+static void mlfq_init(void)
+{
+    for (int l = 0; l < MLFQ_LEVELS; l++) q_init(&mlfq_q[l]);
+    for (int i = 0; i < nprocs; i++) procs[i].level = 0;
+}
+
+static void mlfq_enqueue(pcb_t *p)          { q_push(&mlfq_q[p->level], p); }
+static void mlfq_on_dispatch(pcb_t *p)      { p->quantum_used = 0; }
+static void mlfq_on_tick(pcb_t *r)          { r->quantum_used++; }
+
+static pcb_t *mlfq_pick(void)
+{
+    int l = mlfq_best_level();
+    return l < MLFQ_LEVELS ? q_pop(&mlfq_q[l]) : NULL;
+}
+
+static bool mlfq_should_preempt(pcb_t *r)
+{
+    if (r->quantum_used >= mlfq_quantum(r->level)) {
+        if (r->level < MLFQ_LEVELS - 1) r->level++;   /* used it all: demote */
+        r->quantum_used = 0;
+        trace("MLFQ: P%d used its quantum, now level %d", r->pid, r->level);
+        return mlfq_best_level() <= r->level;
+    }
+    return mlfq_best_level() < r->level;               /* higher level is ready */
+}
+
+static int mlfq_ready_count(void)
+{
+    int n = 0;
+    for (int l = 0; l < MLFQ_LEVELS; l++) n += q_size(&mlfq_q[l]);
+    return n;
+}
+
+static scheduler_t sched_mlfq = {
+    "mlfq", mlfq_init, mlfq_enqueue, mlfq_should_preempt, mlfq_pick,
+    mlfq_on_dispatch, mlfq_on_tick, mlfq_ready_count
+};
 
 static scheduler_t *all[] = {
     &sched_fcfs, &sched_rr, &sched_sjf, &sched_srtf, &sched_prio, &sched_mlfq
