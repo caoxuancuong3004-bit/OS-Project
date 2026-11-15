@@ -12,6 +12,7 @@
 #include <string.h>
 #include "sched.h"
 #include "queue.h"
+#include "kernel.h"   /* running, for the MLFQ boost */
 
 scheduler_t *sched = NULL;
 
@@ -123,11 +124,15 @@ static scheduler_t sched_prio = { "prio", prio_init, NULL, NULL, NULL, NULL, NUL
  *   - A process that blocks (io, disk, semaphore...) before its quantum ends
  *     keeps its level. So does one preempted by a higher level.
  *   - A READY process at a higher level preempts the running one.
- * The quantum restarts at every dispatch (as in RR).
- * Not done yet: the priority boost every 20 ticks. */
+ *   - Every 20 ticks (t = 20, 40, ...) every process goes back to level 0
+ *     (priority boost), so nobody starves. The running process also gets a
+ *     fresh level-0 quantum.
+ * The quantum restarts at every dispatch (as in RR). */
 #define MLFQ_LEVELS 3
+#define MLFQ_BOOST  20
 
 static queue_t mlfq_q[MLFQ_LEVELS];
+static long    mlfq_period;                    /* now / MLFQ_BOOST of the last boost */
 
 static int mlfq_quantum(int level) { return cfg.quantum << level; }   /* q, 2q, 4q */
 
@@ -139,10 +144,25 @@ static int mlfq_best_level(void)
     return MLFQ_LEVELS;
 }
 
+/* Priority boost. Called from should_preempt() and pick(): in every tick the
+ * kernel calls at least one of them, so no boost is missed. */
+static void mlfq_boost_if_due(void)
+{
+    long period = now / MLFQ_BOOST;
+    if (period <= mlfq_period) return;
+    mlfq_period = period;
+    for (int l = 1; l < MLFQ_LEVELS; l++)      /* ready queues: keep FIFO order */
+        while (!q_empty(&mlfq_q[l])) q_push(&mlfq_q[0], q_pop(&mlfq_q[l]));
+    for (int i = 0; i < nprocs; i++) procs[i].level = 0;   /* running and blocked too */
+    if (running) running->quantum_used = 0;
+    trace("MLFQ boost: every process back to level 0");
+}
+
 static void mlfq_init(void)
 {
     for (int l = 0; l < MLFQ_LEVELS; l++) q_init(&mlfq_q[l]);
     for (int i = 0; i < nprocs; i++) procs[i].level = 0;
+    mlfq_period = 0;
 }
 
 static void mlfq_enqueue(pcb_t *p)          { q_push(&mlfq_q[p->level], p); }
@@ -151,12 +171,14 @@ static void mlfq_on_tick(pcb_t *r)          { r->quantum_used++; }
 
 static pcb_t *mlfq_pick(void)
 {
+    mlfq_boost_if_due();
     int l = mlfq_best_level();
     return l < MLFQ_LEVELS ? q_pop(&mlfq_q[l]) : NULL;
 }
 
 static bool mlfq_should_preempt(pcb_t *r)
 {
+    mlfq_boost_if_due();
     if (r->quantum_used >= mlfq_quantum(r->level)) {
         if (r->level < MLFQ_LEVELS - 1) r->level++;   /* used it all: demote */
         r->quantum_used = 0;
