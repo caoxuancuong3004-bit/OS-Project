@@ -81,11 +81,28 @@ static scheduler_t sched_sjf = {
     sjf_on_dispatch, sjf_on_tick, sjf_ready_count
 };
 
-/* SRTF
- * TODO: SJF with preemption. should_preempt(r) is true when a READY process
- * has less left of its burst than r, that is q_min_key(&q, key) < key(r). */
-static void srtf_init(void) { die("scheduler 'srtf' is not implemented yet (src/sched.c)"); }
-static scheduler_t sched_srtf = { "srtf", srtf_init, NULL, NULL, NULL, NULL, NULL, NULL };
+/* SRTF: shortest remaining time first (SJF with preemption).
+ * Same queue and key as SJF. Before every tick, the running process is
+ * preempted if some READY process has strictly less left of its burst
+ * (a tie does not preempt, so we avoid useless context switches). */
+static queue_t srtf_q;
+
+static void   srtf_init(void)               { q_init(&srtf_q); }
+static void   srtf_enqueue(pcb_t *p)        { q_push(&srtf_q, p); }
+static pcb_t *srtf_pick(void)               { return q_pop_min(&srtf_q, burst_key); }
+static void   srtf_on_dispatch(pcb_t *p)    { (void)p; }
+static void   srtf_on_tick(pcb_t *r)        { (void)r; }
+static int    srtf_ready_count(void)        { return q_size(&srtf_q); }
+
+static bool srtf_should_preempt(pcb_t *r)
+{
+    return q_min_key(&srtf_q, burst_key) < burst_key(r);
+}
+
+static scheduler_t sched_srtf = {
+    "srtf", srtf_init, srtf_enqueue, srtf_should_preempt, srtf_pick,
+    srtf_on_dispatch, srtf_on_tick, srtf_ready_count
+};
 
 /* PRIO
  * TODO: priority with preemption (smaller number = higher priority), and RR
