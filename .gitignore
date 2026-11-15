@@ -1,5 +1,6 @@
 build/
 ossim
+ossim.exe
 *.o
 *.csv
 .DS_Store
