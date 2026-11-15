@@ -56,8 +56,24 @@ for s in sjf srtf prio mlfq; do
     check "Producer/consumer completes under $s" \
           "$BIN workloads/producer_consumer.txt --sched $s --quantum 2 --no-paging" "finished=2/2"
 done
-# TODO: add hand-computed avg_waiting / avg_response for every scheduler on
-# workloads/arrivals.txt (and show the Gantt chart in your design note).
+
+# Hand-computed on workloads/arrivals.txt, quantum 2, no paging. The Gantt
+# charts and the per-process tables are in CHECKPOINT1.md.
+
+# SJF : P1 0-6 | P4 7-8 | P3 9-11 | P1 12-15 | P5 16-20 | P3 21-23 | P6 24-29 | P2 30-38
+#       waiting 2,28,9,1,8,12 = 60/6   response 0,28,5,1,8,12 = 54/6
+SJF="$BIN workloads/arrivals.txt --sched sjf --quantum 2 --no-paging"
+check "SJF on arrivals.txt: avg waiting 10.00"  "$SJF" "avg_waiting=10.00"
+check "SJF on arrivals.txt: avg response 9.00"  "$SJF" "avg_response=9.00"
+check "SJF on arrivals.txt: 8 context switches" "$SJF" "context_switches=8"
+
+# SRTF: as SJF until t=16, then J3 back from io (3 left) preempts J5 (4 left) at t=17
+#       P5 16 | P3 17-19 | P5 20-23 | P6 24-29 | P2 30-38
+#       waiting 2,28,5,1,11,12 = 59/6  response 0,28,5,1,8,12 = 54/6
+SRTF="$BIN workloads/arrivals.txt --sched srtf --quantum 2 --no-paging"
+check "SRTF on arrivals.txt: avg waiting 9.83"   "$SRTF" "avg_waiting=9.83"
+check "SRTF on arrivals.txt: avg response 9.00"  "$SRTF" "avg_response=9.00"
+check "SRTF on arrivals.txt: 9 context switches" "$SRTF" "context_switches=9"
 
 # --- checkpoint 2 ----------------------------------------------------------
 check "Paging: LRU, 3 frames -> 12 faults (textbook Sec. 10.4.4)" \
