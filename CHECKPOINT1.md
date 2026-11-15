@@ -9,9 +9,9 @@ structures of the schedulers, how we checked them, and who did what.
 |---|---|
 | `src/sched.c` | SJF, SRTF, PRIO and MLFQ |
 | `src/sync.c` | `deadlock_check()`: the detection algorithm of Sec. 8.6.2 |
-| `tests/run.sh` | Hand-computed checks for each scheduler on `arrivals.txt`, plus a deadlock timing check |
+| `tests/run.sh` | Hand-computed checks for each scheduler on `arrivals.txt`, plus two deadlock checks (found at t=12 under RR; none under FCFS) |
 
-`make test` result: **27 passed, 4 skipped, 0 failed**. The 4 skips are Checkpoint 2 (LRU, SSTF, SCAN,
+`make test` result: **28 passed, 4 skipped, 0 failed**. The 4 skips are Checkpoint 2 (LRU, SSTF, SCAN,
 C-LOOK).
 
 ## Build and run
