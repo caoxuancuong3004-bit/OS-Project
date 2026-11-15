@@ -56,14 +56,30 @@ static scheduler_t sched_rr = {
     rr_on_dispatch, rr_on_tick, rr_ready_count
 };
 
-/* SJF
- * TODO: shortest job first, non-preemptive.
- *   pick(): q_pop_min(&q, key) with key = proc_burst_remaining
- *   should_preempt(): always false
- * For your report: ossim knows the exact length of the next burst, a real
- * OS does not. How would you add exponential averaging (Sec. 5.3.2)? */
-static void sjf_init(void) { die("scheduler 'sjf' is not implemented yet (src/sched.c)"); }
-static scheduler_t sched_sjf = { "sjf", sjf_init, NULL, NULL, NULL, NULL, NULL, NULL };
+/* Key used by SJF and SRTF: ticks left in the current cpu burst. */
+static int burst_key(const pcb_t *p) { return proc_burst_remaining(p); }
+
+/* SJF: shortest job first, non-preemptive.
+ * Data structure: one ready queue (queue_t) in arrival order. pick() scans it
+ * and removes the process with the shortest next cpu burst; on a tie the one
+ * that became READY first wins (q_pop_min keeps FIFO order on ties).
+ * A dispatched process keeps the CPU until its burst ends or it blocks.
+ * Note: ossim knows the exact next burst. A real OS would have to predict it,
+ * e.g. by exponential averaging tau(n+1) = a*t(n) + (1-a)*tau(n) (Sec. 5.3.2). */
+static queue_t sjf_q;
+
+static void   sjf_init(void)                { q_init(&sjf_q); }
+static void   sjf_enqueue(pcb_t *p)         { q_push(&sjf_q, p); }
+static bool   sjf_should_preempt(pcb_t *r)  { (void)r; return false; }
+static pcb_t *sjf_pick(void)                { return q_pop_min(&sjf_q, burst_key); }
+static void   sjf_on_dispatch(pcb_t *p)     { (void)p; }
+static void   sjf_on_tick(pcb_t *r)         { (void)r; }
+static int    sjf_ready_count(void)         { return q_size(&sjf_q); }
+
+static scheduler_t sched_sjf = {
+    "sjf", sjf_init, sjf_enqueue, sjf_should_preempt, sjf_pick,
+    sjf_on_dispatch, sjf_on_tick, sjf_ready_count
+};
 
 /* SRTF
  * TODO: SJF with preemption. should_preempt(r) is true when a READY process
