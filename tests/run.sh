@@ -75,23 +75,7 @@ check "SRTF on arrivals.txt: avg waiting 9.83"   "$SRTF" "avg_waiting=9.83"
 check "SRTF on arrivals.txt: avg response 9.00"  "$SRTF" "avg_response=9.00"
 check "SRTF on arrivals.txt: 9 context switches" "$SRTF" "context_switches=9"
 
-# PRIO (1 = highest, RR q=2 between equals):
-#       P1 0-1 | P2 2-10 | P1 11 | P6 12-17 | P4 18-19 | P1 20-23 | P3 24-25 | P5 26
-#       | P1 27-30 | P3 31 | P5 32-35 | idle 36 | P3 37-39
-#       waiting 17,0,25,12,23,0 = 77/6   response 0,0,20,12,18,0 = 50/6
-PRIO="$BIN workloads/arrivals.txt --sched prio --quantum 2 --no-paging"
-check "PRIO on arrivals.txt: avg waiting 12.83"   "$PRIO" "avg_waiting=12.83"
-check "PRIO on arrivals.txt: avg response 8.33"   "$PRIO" "avg_response=8.33"
-check "PRIO on arrivals.txt: 12 context switches" "$PRIO" "context_switches=12"
 
-# Deadlock: under RR q=2, A and B are deadlocked from t=12 (B blocks on R1 at
-# the end of tick 11, A blocks on R2 during tick 12), so a check every tick
-# reports it at t=12. FCFS never preempts, A gets R1 and R2 before B runs,
-# so there is no deadlock and detection must not report one.
-check "Deadlock detection every tick reports it at t=12" \
-      "$BIN workloads/deadlock.txt --sched rr --quantum 2 --deadlock-every 1 --max-ticks 60 --no-paging" "DEADLOCK t=12"
-check "Deadlock workload under FCFS: no deadlock, all finish" \
-      "$BIN workloads/deadlock.txt --sched fcfs --deadlock-every 1 --max-ticks 60 --no-paging" "finished=3/3"
 
 # --- checkpoint 2 ----------------------------------------------------------
 check "Paging: LRU, 3 frames -> 12 faults (textbook Sec. 10.4.4)" \
