@@ -105,12 +105,43 @@ static scheduler_t sched_srtf = {
     srtf_on_dispatch, srtf_on_tick, srtf_ready_count
 };
 
-/* PRIO
- * TODO: priority with preemption (smaller number = higher priority), and RR
- * between processes of the same priority. Low priorities can starve; aging
- * is a stretch goal. */
-static void prio_init(void) { die("scheduler 'prio' is not implemented yet (src/sched.c)"); }
-static scheduler_t sched_prio = { "prio", prio_init, NULL, NULL, NULL, NULL, NULL, NULL };
+/* PRIO: preemptive priority (smaller number = higher priority), RR with
+ * quantum cfg.quantum between processes of the same priority.
+ * Data structure: one ready queue (queue_t) in the order processes became
+ * READY. pick() removes the process with the smallest priority number; on a
+ * tie the one nearer the head, i.e. the one that has waited longest, wins.
+ * A preempted process goes to the tail, so equal priorities take turns.
+ * The running process is preempted before a tick if
+ *   - a READY process has a strictly higher priority, or
+ *   - its quantum is used up and a READY process has the same priority.
+ * If the quantum is used up and nobody of equal or higher priority is ready,
+ * it keeps the CPU and starts a new quantum (the same rule as RR).
+ * Low priorities can starve while higher ones keep arriving; there is no
+ * aging, so the numbers match the hand-computed ones in CHECKPOINT1.md. */
+static queue_t prio_q;
+
+static int prio_key(const pcb_t *p) { return p->priority; }
+
+static void   prio_init(void)            { q_init(&prio_q); }
+static void   prio_enqueue(pcb_t *p)     { q_push(&prio_q, p); }
+static pcb_t *prio_pick(void)            { return q_pop_min(&prio_q, prio_key); }
+static void   prio_on_dispatch(pcb_t *p) { p->quantum_used = 0; }
+static void   prio_on_tick(pcb_t *r)     { r->quantum_used++; }
+static int    prio_ready_count(void)     { return q_size(&prio_q); }
+
+static bool prio_should_preempt(pcb_t *r)
+{
+    int best = q_min_key(&prio_q, prio_key);   /* INT_MAX if nobody is ready */
+    if (best < r->priority) return true;        /* higher priority is ready */
+    if (r->quantum_used < cfg.quantum) return false;
+    r->quantum_used = 0;                        /* new quantum if it keeps the CPU */
+    return best == r->priority;                 /* RR among equals */
+}
+
+static scheduler_t sched_prio = {
+    "prio", prio_init, prio_enqueue, prio_should_preempt, prio_pick,
+    prio_on_dispatch, prio_on_tick, prio_ready_count
+};
 
 /* MLFQ: multilevel feedback queue, 3 levels, RR in each level with quantum
  * q, 2q, 4q (q = cfg.quantum). Level 0 is the highest priority.

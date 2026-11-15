@@ -111,22 +111,63 @@ void res_release(pcb_t *p, resource_t *r, int n)
 }
 
 /*
- * TODO checkpoint 1: deadlock detection.
- * The kernel calls this every cfg.deadlock_interval ticks (never if it is 0).
- * Two ways to do it, choose one:
- *   - Wait-for graph (one instance per resource): build it from
- *     resources[].waiters, requested[] and allocated[]. A cycle is a deadlock.
- *   - Detection algorithm of Sec. 8.6.2 (several instances), with
- *     Available = r->available, Allocation = r->allocated and
- *     Request = r->requested.
- * Print the deadlocked processes in exactly this format, pids from small to
- * large, because tests/run.sh looks for it:
+ * Deadlock detection: the algorithm of Sec. 8.6.2 (several instances).
+ *   Work = Available
+ *   Finish[i] = true if P_i is terminated or holds no instances
+ *   repeat: find P_i with !Finish[i] and Request_i <= Work,
+ *           then Work += Allocation_i and Finish[i] = true
+ *   every P_i still !Finish[i] is deadlocked.
+ * Request_i is r->requested[pid], which res_acquire() sets only while P_i is
+ * blocked on r, so a process that is not blocked on a resource can always
+ * finish. Semaphores are not included: a semaphore has no owner, so there is
+ * no Allocation to give back.
+ * We only report (no recovery), and each deadlocked process is reported
+ * once: a line is printed only when the set contains a pid not reported
+ * before. Output, pids from small to large:
  *     DEADLOCK t=<now> pids: 1 2
- * After that you can kill a victim with kernel_abort(p) (see kernel.h) or
- * only report it and let --max-ticks end the run. If you only report, print
- * each deadlock once. workloads/deadlock.txt must be detected.
  */
 void deadlock_check(void)
 {
-    die("deadlock_check() is not implemented yet (src/sync.c)");
+    static bool reported[MAX_PROCS + 1];
+    int  work[MAX_RES];
+    bool finish[MAX_PROCS + 1];
+
+    for (int j = 0; j < nres; j++) work[j] = resources[j].available;
+
+    for (int i = 0; i < nprocs; i++) {
+        pcb_t *p = &procs[i];
+        bool holds = false;
+        for (int j = 0; j < nres; j++)
+            if (resources[j].allocated[p->pid] > 0) holds = true;
+        finish[p->pid] = p->state == P_TERMINATED || !holds;
+    }
+
+    bool progress = true;
+    while (progress) {
+        progress = false;
+        for (int i = 0; i < nprocs; i++) {
+            int pid = procs[i].pid;
+            if (finish[pid]) continue;
+            bool fits = true;
+            for (int j = 0; j < nres; j++)
+                if (resources[j].requested[pid] > work[j]) { fits = false; break; }
+            if (!fits) continue;
+            for (int j = 0; j < nres; j++) work[j] += resources[j].allocated[pid];
+            finish[pid] = true;
+            progress = true;
+        }
+    }
+
+    bool any_new = false;
+    for (int pid = 1; pid <= MAX_PROCS; pid++)
+        if (proc_by_pid(pid) && !finish[pid] && !reported[pid]) any_new = true;
+    if (!any_new) return;
+
+    printf("DEADLOCK t=%ld pids:", now);
+    for (int pid = 1; pid <= MAX_PROCS; pid++) {
+        if (!proc_by_pid(pid) || finish[pid]) continue;
+        printf(" %d", pid);
+        reported[pid] = true;
+    }
+    printf("\n");
 }
